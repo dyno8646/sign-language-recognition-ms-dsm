@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Real-Time SLR MVP</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Real-Time Sign Language Recognition</h1>
+      <p class="subtitle">Inference-only MVP (webcam -> text -> speech)</p>
+
+      <section class="grid">
+        <div class="panel">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="canvas" class="hidden"></canvas>
+          <div class="controls">
+            <button id="startBtn">Start</button>
+            <button id="stopBtn" disabled>Stop</button>
+            <button id="speakBtn">Speak</button>
+            <label class="toggle">
+              <input id="autoSpeak" type="checkbox" />
+              Auto Speak
+            </label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Recognition Output</h3>
+          <div id="status">Status: idle</div>
+          <div id="engine">Engine: unknown</div>
+          <div id="confidence">Confidence: 0.00</div>
+          <div id="text" class="text-box">No prediction yet...</div>
+        </div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

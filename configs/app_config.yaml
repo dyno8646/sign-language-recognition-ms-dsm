@@ -1,0 +1,20 @@
+app:
+  host: 0.0.0.0
+  port: 8000
+  debug: true
+
+inference:
+  engine: mock
+  target_fps: 4
+  frame_width: 320
+  frame_height: 240
+  window_size: 16
+  inference_every_n_frames: 8
+  min_confidence: 0.25
+  cooldown_seconds: 0.8
+
+slrt:
+  repo_path: third_party_SLRT
+  checkpoint_path: checkpoints/slrt/best.ckpt
+  vocab_path: checkpoints/slrt/vocab.json
+  device: auto
