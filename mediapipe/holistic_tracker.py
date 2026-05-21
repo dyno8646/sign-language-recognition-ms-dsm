@@ -17,34 +17,33 @@ _PROJECT_ROOT = _LOCAL_PKG_DIR.parent
 
 def _import_google_mediapipe() -> Any:
     """Import the installed MediaPipe library without breaking this repo package."""
-    import site
-    import importlib.util
-
     cached = sys.modules.get("_google_mediapipe_lib")
     if cached is not None:
         return cached
 
-    for site_dir in site.getsitepackages() + [site.getusersitepackages()]:
-        if not site_dir:
-            continue
-        init_py = Path(site_dir) / "mediapipe" / "__init__.py"
-        if not init_py.is_file():
-            continue
-        if init_py.resolve().parent == _LOCAL_PKG_DIR:
-            continue
+    local_pkg = sys.modules.get("mediapipe")
+    if local_pkg is not None and not hasattr(local_pkg, "solutions"):
+        del sys.modules["mediapipe"]
 
-        spec = importlib.util.spec_from_file_location("_google_mediapipe_lib", init_py)
-        if spec is None or spec.loader is None:
-            continue
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        if hasattr(module, "solutions"):
-            sys.modules["_google_mediapipe_lib"] = module
-            return module
-
-    raise ImportError(
-        "Google MediaPipe is not installed. Run: pip install mediapipe>=0.10.9"
-    )
+    original_path = sys.path.copy()
+    try:
+        sys.path = [
+            p
+            for p in sys.path
+            if Path(p).resolve() != _PROJECT_ROOT.resolve()
+        ]
+        mp = importlib.import_module("mediapipe")
+        if not hasattr(mp, "solutions"):
+            raise ImportError(
+                "Installed MediaPipe has no 'solutions' API. "
+                "Use: pip install mediapipe==0.10.14"
+            )
+        sys.modules["_google_mediapipe_lib"] = mp
+        return mp
+    finally:
+        sys.path[:] = original_path
+        if local_pkg is not None:
+            sys.modules["mediapipe"] = local_pkg
 
 
 _mp = _import_google_mediapipe()

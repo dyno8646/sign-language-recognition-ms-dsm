@@ -21,6 +21,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from mediapipe.holistic_tracker import HolisticTracker
 
+try:
+    from tts.coqui_tts import speak_word as _speak_word
+except ImportError:
+    _speak_word = None  # type: ignore[assignment]
+
 WORDS: list[str] = [
     "hello",
     "thanks",
@@ -202,6 +207,9 @@ def collect_data() -> None:
                         f"  Sequence {sequence_num}/{SEQUENCES} — "
                         f"countdown {COUNTDOWN_SECONDS}s..."
                     )
+                    if _speak_word is not None:
+                        print(f"  TTS: say the sign for '{word}'")
+                        _speak_word(word)
 
                     if not _wait_countdown(cap, tracker, word, sequence_num):
                         print("Collection stopped by user (Q pressed).")

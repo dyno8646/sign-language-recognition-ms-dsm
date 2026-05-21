@@ -1,12 +1,11 @@
 """
-Train a BiLSTM classifier on collected Holistic keypoint sequences.
+Phase 0 — Train BiLSTM on collected keypoint sequences.
 
-Loads data from ``datasets/custom/keypoints/``, trains with an 80/20 stratified
-split, and saves the best checkpoint plus a fitted label encoder.
+Usage:
+    python training/train_bilstm.py
+    python training/train_bilstm.py --config configs/config.yaml
 """
-
-from __future__ import annotations
-
+import argparse
 import pickle
 import sys
 from pathlib import Path
@@ -14,298 +13,166 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import yaml
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from models.bilstm.model import SignBiLSTM
-
-DATA_PATH = _PROJECT_ROOT / "datasets" / "custom" / "keypoints"
-CHECKPOINT_DIR = _PROJECT_ROOT / "checkpoints"
-MODEL_PATH = CHECKPOINT_DIR / "bilstm_best.pt"
-ENCODER_PATH = CHECKPOINT_DIR / "label_encoder.pkl"
-
-SEQUENCE_LENGTH = 30
-INPUT_SIZE = 258
-NUM_CLASSES = 20
-HIDDEN_SIZE = 128
-NUM_LAYERS = 2
-DROPOUT = 0.5
-
-EPOCHS = 50
-LEARNING_RATE = 1e-3
-BATCH_SIZE = 32
-VAL_SPLIT = 0.2
-RANDOM_SEED = 42
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.models.bilstm.model import SignBiLSTM
 
 
-def load_sequence(sequence_dir: Path, sequence_length: int = SEQUENCE_LENGTH) -> np.ndarray:
-    """
-    Load all frame ``.npy`` files in a sequence folder and pad/truncate to fixed length.
-
-    Args:
-        sequence_dir: Directory containing ``0.npy``, ``1.npy``, ...
-        sequence_length: Target number of frames.
-
-    Returns:
-        Array of shape ``(sequence_length, features)``.
-    """
-    frame_files = sorted(sequence_dir.glob("*.npy"), key=lambda p: int(p.stem))
-    if not frame_files:
-        return np.zeros((sequence_length, INPUT_SIZE), dtype=np.float32)
-
-    frames = [np.load(path).astype(np.float32).reshape(-1) for path in frame_files]
-    stacked = np.stack(frames, axis=0)
-
-    if stacked.shape[1] != INPUT_SIZE:
-        raise ValueError(
-            f"Expected {INPUT_SIZE} features per frame in {sequence_dir}, "
-            f"got shape {stacked.shape}"
-        )
-
-    if stacked.shape[0] >= sequence_length:
-        return stacked[:sequence_length]
-
-    pad = np.zeros((sequence_length - stacked.shape[0], INPUT_SIZE), dtype=np.float32)
-    return np.vstack([stacked, pad])
-
-
-def discover_samples(data_path: Path) -> tuple[list[Path], list[str]]:
-    """
-    Discover all sequence directories under ``data_path/<word>/<seq>/``.
-
-    Returns:
-        Tuple of sequence directory paths and string labels (word names).
-    """
-    sequence_dirs: list[Path] = []
-    labels: list[str] = []
-
-    if not data_path.is_dir():
-        raise FileNotFoundError(
-            f"Data path not found: {data_path}. "
-            "Run webcam/webcam_capture.py first to collect keypoints."
-        )
-
-    for word_dir in sorted(data_path.iterdir()):
-        if not word_dir.is_dir():
-            continue
-        word = word_dir.name
-        for seq_dir in sorted(word_dir.iterdir(), key=lambda p: int(p.name)):
-            if not seq_dir.is_dir():
-                continue
-            if list(seq_dir.glob("*.npy")):
-                sequence_dirs.append(seq_dir)
-                labels.append(word)
-
-    if not sequence_dirs:
-        raise RuntimeError(f"No .npy sequences found under {data_path}")
-
-    return sequence_dirs, labels
-
-
+# ── Dataset ───────────────────────────────────────────────────────────────────
 class SignSequenceDataset(Dataset):
-    """
-    PyTorch dataset of sign keypoint sequences stored as per-frame ``.npy`` files.
+    """Loads saved .npy keypoint sequences."""
 
-    Each item is one sequence folder (30 frames padded/truncated) with an integer label.
-    """
-
-    def __init__(
-        self,
-        sequence_dirs: list[Path],
-        labels: list[int],
-        sequence_length: int = SEQUENCE_LENGTH,
-    ) -> None:
-        """
-        Args:
-            sequence_dirs: Paths to ``.../<word>/<sequence_id>/`` folders.
-            labels: Encoded class index per sequence.
-            sequence_length: Fixed temporal length.
-        """
-        self.sequence_dirs = sequence_dirs
-        self.labels = labels
-        self.sequence_length = sequence_length
+    def __init__(self, sequences: list, labels: list, seq_len: int = 30) -> None:
+        self.sequences = sequences
+        self.labels    = labels
+        self.seq_len   = seq_len
 
     def __len__(self) -> int:
-        return len(self.sequence_dirs)
+        return len(self.sequences)
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
-        seq_dir = self.sequence_dirs[index]
-        sequence = load_sequence(seq_dir, self.sequence_length)
-        x = torch.from_numpy(sequence).float()
-        y = int(self.labels[index])
-        return x, y
+    def __getitem__(self, idx):
+        seq = self.sequences[idx]
+        T, F = seq.shape
 
+        # pad or truncate to fixed length
+        if T < self.seq_len:
+            pad = np.zeros((self.seq_len - T, F), dtype=np.float32)
+            seq = np.vstack([seq, pad])
+        else:
+            seq = seq[: self.seq_len]
 
-def accuracy(logits: torch.Tensor, targets: torch.Tensor) -> float:
-    """Compute classification accuracy."""
-    preds = logits.argmax(dim=1)
-    return (preds == targets).float().mean().item()
-
-
-def train_epoch(
-    model: SignBiLSTM,
-    loader: DataLoader,
-    criterion: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-) -> float:
-    """Run one training epoch and return mean loss."""
-    model.train()
-    total_loss = 0.0
-    count = 0
-
-    for batch_x, batch_y in tqdm(loader, desc="Train", leave=False):
-        batch_x = batch_x.to(device)
-        batch_y = batch_y.to(device)
-
-        optimizer.zero_grad()
-        logits = model(batch_x)
-        loss = criterion(logits, batch_y)
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item() * batch_x.size(0)
-        count += batch_x.size(0)
-
-    return total_loss / max(count, 1)
-
-
-@torch.no_grad()
-def evaluate(
-    model: SignBiLSTM,
-    loader: DataLoader,
-    criterion: nn.Module,
-    device: torch.device,
-) -> tuple[float, float]:
-    """Evaluate validation loss and accuracy."""
-    model.eval()
-    total_loss = 0.0
-    correct = 0
-    count = 0
-
-    for batch_x, batch_y in tqdm(loader, desc="Val", leave=False):
-        batch_x = batch_x.to(device)
-        batch_y = batch_y.to(device)
-
-        logits = model(batch_x)
-        loss = criterion(logits, batch_y)
-
-        total_loss += loss.item() * batch_x.size(0)
-        correct += (logits.argmax(dim=1) == batch_y).sum().item()
-        count += batch_x.size(0)
-
-    mean_loss = total_loss / max(count, 1)
-    acc = correct / max(count, 1)
-    return mean_loss, acc
-
-
-def main() -> None:
-    """Load data, train BiLSTM, and save best checkpoint."""
-    torch.manual_seed(RANDOM_SEED)
-    np.random.seed(RANDOM_SEED)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-
-    sequence_dirs, word_labels = discover_samples(DATA_PATH)
-
-    label_encoder = LabelEncoder()
-    encoded_labels = label_encoder.fit_transform(word_labels)
-
-    if len(label_encoder.classes_) != NUM_CLASSES:
-        print(
-            f"Warning: found {len(label_encoder.classes_)} classes, "
-            f"expected {NUM_CLASSES}. Training with discovered labels."
+        return (
+            torch.tensor(seq, dtype=torch.float32),
+            torch.tensor(self.labels[idx], dtype=torch.long),
         )
 
-    (
-        train_dirs,
-        val_dirs,
-        train_labels,
-        val_labels,
-    ) = train_test_split(
-        sequence_dirs,
-        encoded_labels,
-        test_size=VAL_SPLIT,
-        random_state=RANDOM_SEED,
-        stratify=encoded_labels,
+
+# ── Data loading ──────────────────────────────────────────────────────────────
+def load_dataset(data_path: Path) -> tuple[list, list]:
+    sequences, labels = [], []
+    words = sorted(p.name for p in data_path.iterdir() if p.is_dir())
+    if not words:
+        return sequences, labels
+    print(f"Words found ({len(words)}): {words}")
+    for word in words:
+        for seq_dir in sorted((data_path / word).iterdir(), key=lambda p: int(p.name)):
+            frames = sorted(seq_dir.glob("*.npy"), key=lambda p: int(p.stem))
+            if not frames:
+                continue
+            seq = np.stack([np.load(str(f)) for f in frames])  # (T, 258)
+            sequences.append(seq)
+            labels.append(word)
+    return sequences, labels
+
+
+# ── Training loop ─────────────────────────────────────────────────────────────
+def train(config: dict) -> None:
+    data_path  = Path(config["data"]["path"])
+    ckpt_dir   = Path(config["checkpoints"]["dir"])
+    seq_len    = config["data"]["sequence_length"]
+    epochs     = config["training"]["epochs"]
+    batch_size = config["training"]["batch_size"]
+    lr         = config["training"]["learning_rate"]
+    val_split  = config["training"]["val_split"]
+
+    _dev = config["training"]["device"]
+    device = (
+        "cuda" if torch.cuda.is_available()
+        else "cpu"
+        if _dev == "auto"
+        else _dev
     )
 
-    train_dataset = SignSequenceDataset(train_dirs, train_labels.tolist())
-    val_dataset = SignSequenceDataset(val_dirs, val_labels.tolist())
+    ckpt_dir.mkdir(exist_ok=True)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=0,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=0,
+    # ── load data ─────────────────────────────────────────────────────────────
+    sequences, raw_labels = load_dataset(data_path)
+    if not sequences:
+        print(f"No data found at {data_path}. Run collect_data.py first.")
+        return
+
+    le     = LabelEncoder()
+    labels = le.fit_transform(raw_labels)
+
+    X_tr, X_val, y_tr, y_val = train_test_split(
+        sequences, labels, test_size=val_split, stratify=labels, random_state=42
     )
 
+    tr_dl  = DataLoader(SignSequenceDataset(X_tr,  y_tr,  seq_len), batch_size=batch_size, shuffle=True)
+    val_dl = DataLoader(SignSequenceDataset(X_val, y_val, seq_len), batch_size=batch_size)
+
+    # ── model ─────────────────────────────────────────────────────────────────
+    model_cfg = config["model"]
     model = SignBiLSTM(
-        input_size=INPUT_SIZE,
-        hidden_size=HIDDEN_SIZE,
-        num_layers=NUM_LAYERS,
-        num_classes=len(label_encoder.classes_),
-        dropout=DROPOUT,
+        input_size=model_cfg["input_size"],
+        hidden_size=model_cfg["hidden_size"],
+        num_layers=model_cfg["num_layers"],
+        num_classes=len(le.classes_),
+        dropout=model_cfg["dropout"],
     ).to(device)
 
+    opt       = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=5, factor=0.5)
 
-    best_val_acc = 0.0
+    best_acc = 0.0
+    print(f"\nTraining on {device} | {len(X_tr)} train  {len(X_val)} val | {len(le.classes_)} classes")
+    print("-" * 55)
 
-    print("=" * 60)
-    print("BiLSTM Training")
-    print(f"  Device:      {device}")
-    print(f"  Samples:     {len(train_dataset)} train / {len(val_dataset)} val")
-    print(f"  Classes:     {list(label_encoder.classes_)}")
-    print(f"  Checkpoint:  {MODEL_PATH}")
-    print("=" * 60)
+    for epoch in range(1, epochs + 1):
+        # train
+        model.train()
+        total_loss = 0.0
+        for xb, yb in tqdm(tr_dl, desc=f"Epoch {epoch:03d}/{epochs}", leave=False):
+            xb, yb = xb.to(device), yb.to(device)
+            opt.zero_grad()
+            loss = criterion(model(xb), yb)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+            total_loss += loss.item()
 
-    for epoch in range(1, EPOCHS + 1):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+        # validate
+        model.eval()
+        correct = total = 0
+        with torch.no_grad():
+            for xb, yb in val_dl:
+                xb, yb = xb.to(device), yb.to(device)
+                correct += (model(xb).argmax(1) == yb).sum().item()
+                total   += yb.size(0)
 
-        print(
-            f"Epoch {epoch:02d}/{EPOCHS} | "
-            f"train_loss={train_loss:.4f} | "
-            f"val_loss={val_loss:.4f} | "
-            f"val_acc={val_acc:.4f}"
-        )
+        avg_loss = total_loss / len(tr_dl)
+        val_acc  = correct / total
+        scheduler.step(avg_loss)
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "val_accuracy": val_acc,
-                    "input_size": INPUT_SIZE,
-                    "hidden_size": HIDDEN_SIZE,
-                    "num_layers": NUM_LAYERS,
-                    "num_classes": len(label_encoder.classes_),
-                    "dropout": DROPOUT,
-                    "sequence_length": SEQUENCE_LENGTH,
-                },
-                MODEL_PATH,
-            )
-            with open(ENCODER_PATH, "wb") as f:
-                pickle.dump(label_encoder, f)
-            print(f"  -> Saved best model (val_acc={val_acc:.4f})")
+        marker = ""
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), ckpt_dir / config["checkpoints"]["best_model"])
+            with open(ckpt_dir / config["checkpoints"]["label_encoder"], "wb") as f:
+                pickle.dump(le, f)
+            marker = "  ✓ saved"
 
-    print(f"\nTraining finished. Best val accuracy: {best_val_acc:.4f}")
+        print(f"Epoch {epoch:03d}  loss={avg_loss:.4f}  val_acc={val_acc:.4f}{marker}")
+
+    print(f"\nBest val accuracy: {best_acc:.4f}")
+    print(f"Checkpoint: {ckpt_dir / config['checkpoints']['best_model']}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/config.yaml")
+    args   = parser.parse_args()
+
+    with open(args.config) as f:
+        cfg = yaml.safe_load(f)
+
+    train(cfg)
 
 
 if __name__ == "__main__":

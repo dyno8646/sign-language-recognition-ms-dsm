@@ -1,26 +1,29 @@
-# Core CV + tracking
+# Core CV
 opencv-python>=4.9.0
 mediapipe>=0.10.9
 
 # Deep learning
 torch>=2.2.0
 torchvision>=0.17.0
+
+# Data / ML
 numpy>=1.26.0
 scikit-learn>=1.4.0
-
-# Data
 pandas>=2.2.0
 
-# TTS
-TTS>=0.22.0
-
-# UI + API
-streamlit>=1.32.0
+# API / backend
 fastapi>=0.110.0
-uvicorn>=0.29.0
+uvicorn[standard]>=0.29.0
 websockets>=12.0
+python-multipart>=0.0.9
 
-# Utilities
+# UI
+streamlit>=1.32.0
+
+# TTS (install separately: pip install TTS)
+# TTS>=0.22.0
+
+# Utils
 tqdm>=4.66.0
 pyyaml>=6.0.1
 python-dotenv>=1.0.1
