@@ -9,12 +9,47 @@ Feature layout (258 total):
   right_hand 21 landmarks × 3 values (x, y, z)             =  63
                                                   total     = 258
 """
+import importlib
+import sys
 import warnings
+from pathlib import Path
+from typing import Any
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import cv2
 import numpy as np
-import mediapipe as mp
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _import_google_mediapipe() -> Any:
+    """Load pip mediapipe (repo has mediapipe/ and src/mediapipe/ folders)."""
+    cached = sys.modules.get("_google_mediapipe_lib")
+    if cached is not None:
+        return cached
+
+    local_pkg = sys.modules.get("mediapipe")
+    if local_pkg is not None and not hasattr(local_pkg, "solutions"):
+        del sys.modules["mediapipe"]
+
+    original_path = sys.path.copy()
+    try:
+        sys.path = [
+            p for p in sys.path if Path(p).resolve() != _PROJECT_ROOT.resolve()
+        ]
+        mp = importlib.import_module("mediapipe")
+        if not hasattr(mp, "solutions"):
+            raise ImportError("Install MediaPipe: pip install mediapipe==0.10.14")
+        sys.modules["_google_mediapipe_lib"] = mp
+        return mp
+    finally:
+        sys.path[:] = original_path
+        if local_pkg is not None:
+            sys.modules["mediapipe"] = local_pkg
+
+
+mp = _import_google_mediapipe()
 
 
 class HolisticTracker:
@@ -80,26 +115,34 @@ class HolisticTracker:
     # ------------------------------------------------------------------
     def draw_landmarks(self, frame: np.ndarray, results) -> np.ndarray:
         """Draw pose + hand landmarks on a BGR frame in-place and return it."""
-        self.mp_drawing.draw_landmarks(
-            frame,
-            results.pose_landmarks,
-            self.mp_holistic.POSE_CONNECTIONS,
-            landmark_drawing_spec=self.mp_styles.get_default_pose_landmarks_style(),
-        )
+        if results.pose_landmarks:
+            self.mp_drawing.draw_landmarks(
+                frame,
+                results.pose_landmarks,
+                self.mp_holistic.POSE_CONNECTIONS,
+                landmark_drawing_spec=self.mp_styles.get_default_pose_landmarks_style(),
+            )
         for hand_landmarks, color_dot, color_conn in [
             (results.left_hand_landmarks,  (121, 22, 76),  (121, 44, 250)),
             (results.right_hand_landmarks, (245, 117, 66), (245, 66, 230)),
         ]:
-            self.mp_drawing.draw_landmarks(
-                frame,
-                hand_landmarks,
-                self.mp_holistic.HAND_CONNECTIONS,
-                self.mp_drawing.DrawingSpec(color=color_dot, thickness=2, circle_radius=2),
-                self.mp_drawing.DrawingSpec(color=color_conn, thickness=2, circle_radius=2),
-            )
+            if hand_landmarks:
+                self.mp_drawing.draw_landmarks(
+                    frame,
+                    hand_landmarks,
+                    self.mp_holistic.HAND_CONNECTIONS,
+                    self.mp_drawing.DrawingSpec(color=color_dot, thickness=2, circle_radius=2),
+                    self.mp_drawing.DrawingSpec(color=color_conn, thickness=2, circle_radius=2),
+                )
         return frame
 
     # ------------------------------------------------------------------
     def close(self) -> None:
         """Release MediaPipe resources."""
         self.holistic.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()

@@ -50,7 +50,12 @@ def load_artifacts(config: dict):
         num_classes=len(le.classes_),
         dropout=cfg["dropout"],
     ).to(device)
-    model.load_state_dict(torch.load(mdl_path, map_location=device))
+    checkpoint = torch.load(mdl_path, map_location=device, weights_only=False)
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+    else:
+        state_dict = checkpoint
+    model.load_state_dict(state_dict)
     model.eval()
 
     return model, le, device

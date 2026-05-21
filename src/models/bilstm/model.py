@@ -36,9 +36,9 @@ class SignBiLSTM(nn.Module):
             bidirectional=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
-        self.norm    = nn.LayerNorm(hidden_size * 2)
-        self.drop    = nn.Dropout(dropout)
-        self.fc      = nn.Linear(hidden_size * 2, num_classes)
+        self.layer_norm = nn.LayerNorm(hidden_size * 2)
+        self.drop       = nn.Dropout(dropout)
+        self.fc         = nn.Linear(hidden_size * 2, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -48,6 +48,6 @@ class SignBiLSTM(nn.Module):
             logits: (batch, num_classes)
         """
         out, _  = self.lstm(x)          # (batch, seq_len, hidden*2)
-        out     = self.norm(out[:, -1]) # last timestep
+        out     = self.layer_norm(out[:, -1])  # last timestep
         out     = self.drop(out)
         return self.fc(out)
