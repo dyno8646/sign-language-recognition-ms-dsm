@@ -19,6 +19,8 @@ class SessionState:
     frame_counter: int = 0
     last_text: str = ""
     last_confidence: float = 0.0
+    last_raw_tokens: list[str] = field(default_factory=list)
+    last_latency_ms: int = 0
     postprocess: PostprocessState = field(default_factory=PostprocessState)
 
 

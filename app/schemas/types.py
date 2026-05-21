@@ -17,5 +17,7 @@ class FramePayload(BaseModel):
 class PredictionResponse(BaseModel):
     text: str
     confidence: float
+    raw_tokens: list[str] = Field(default_factory=list)
+    latency_ms: int = 0
     updated: bool
     engine: str

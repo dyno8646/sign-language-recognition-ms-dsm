@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass
 class InferenceSettings:
-    engine: str = os.getenv("SLR_ENGINE", "mock")
+    engine: str = os.getenv("SLR_ENGINE", "slrt_online")
     target_fps: int = int(os.getenv("SLR_TARGET_FPS", "4"))
     frame_width: int = int(os.getenv("SLR_FRAME_WIDTH", "320"))
     frame_height: int = int(os.getenv("SLR_FRAME_HEIGHT", "240"))
@@ -23,6 +23,7 @@ class SLRTSettings:
     checkpoint_path: str = os.getenv("SLRT_CHECKPOINT_PATH", "checkpoints/slrt/best.ckpt")
     vocab_path: str = os.getenv("SLRT_VOCAB_PATH", "checkpoints/slrt/vocab.json")
     device: str = os.getenv("SLRT_DEVICE", "auto")
+    config_path: str = os.getenv("SLR_SLRT_CONFIG_PATH", "")
 
 
 @dataclass

@@ -3,6 +3,8 @@ const canvas = document.getElementById("canvas");
 const statusEl = document.getElementById("status");
 const engineEl = document.getElementById("engine");
 const confidenceEl = document.getElementById("confidence");
+const latencyEl = document.getElementById("latency");
+const tokensEl = document.getElementById("tokens");
 const textEl = document.getElementById("text");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -16,6 +18,7 @@ let sessionId = null;
 let captureTimer = null;
 let lastSpoken = "";
 let lastText = "";
+let lastSpokenAt = 0;
 
 const TARGET_FPS = 4;
 const FRAME_W = 320;
@@ -27,6 +30,11 @@ function setStatus(msg) {
 
 function speak(text) {
   if (!text) return;
+  const now = Date.now();
+  if (now - lastSpokenAt < 1200) return;
+  if (text === lastSpoken) return;
+  lastSpoken = text;
+  lastSpokenAt = now;
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 1.0;
   speechSynthesis.speak(u);
@@ -83,11 +91,12 @@ async function captureLoop() {
     const pred = await api("/api/frame", "POST", payload);
     engineEl.textContent = `Engine: ${pred.engine}`;
     confidenceEl.textContent = `Confidence: ${pred.confidence.toFixed(2)}`;
+    latencyEl.textContent = `Latency: ${pred.latency_ms} ms`;
+    tokensEl.textContent = `Tokens: ${(pred.raw_tokens || []).join(" ") || "-"}`;
     if (pred.text) {
       textEl.textContent = pred.text;
       lastText = pred.text;
-      if (autoSpeak.checked && pred.updated && pred.text !== lastSpoken) {
-        lastSpoken = pred.text;
+      if (autoSpeak.checked && pred.updated) {
         speak(pred.text);
       }
     }
@@ -98,6 +107,11 @@ async function captureLoop() {
 
 async function start() {
   setStatus("starting");
+  const health = await api("/health");
+  engineEl.textContent = `Engine: ${health.engine} (${health.ready ? "ready" : "not ready"})`;
+  if (!health.ready) {
+    setStatus(`engine not ready: ${health.status_message}`);
+  }
   await startCamera();
   await startSession();
   captureTimer = setInterval(captureLoop, Math.floor(1000 / TARGET_FPS));

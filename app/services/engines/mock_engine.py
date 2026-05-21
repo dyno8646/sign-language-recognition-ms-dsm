@@ -26,6 +26,6 @@ class MockInferenceEngine(BaseInferenceEngine):
 
     def predict_sequence(self, frames: Sequence[np.ndarray]) -> EnginePrediction:
         if len(frames) < 4:
-            return EnginePrediction(text="", confidence=0.0)
+            return EnginePrediction(text="", confidence=0.0, raw_tokens=[], latency_ms=0)
         text, conf = next(self._phrases)
-        return EnginePrediction(text=text, confidence=conf)
+        return EnginePrediction(text=text, confidence=conf, raw_tokens=text.split(), latency_ms=5)

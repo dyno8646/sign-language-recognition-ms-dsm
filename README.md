@@ -58,15 +58,39 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - [http://localhost:8000](http://localhost:8000)
 
+## Checkpoint Layout (Required)
+
+Place pretrained SLRT assets under:
+
+```text
+checkpoints/slrt/
+  best.ckpt
+  phoenix_iso_with_blank.vocab   # or vocab.json
+  slide_phoenix-2014t.yaml       # optional; auto-falls back to upstream config
+```
+
+Auto-discovery at startup searches for:
+
+- checkpoint: `*.ckpt`, `*.pth`, `*.pt`
+- vocab: `*.vocab`, `*.json`
+- config: env `SLR_SLRT_CONFIG_PATH`, then `third_party_SLRT/Online/CSLR/configs/slide_phoenix-2014t.yaml`
+
+The backend exposes readiness details via `GET /health`.
+
 ## Engine Modes
 
 Set `SLR_ENGINE` environment variable:
 
-- `mock` (default): stable demo pipeline without heavyweight model dependencies.
-- `slrt_online`: attempts SLRT-style inference flow (checkpoint + vocab required).
+- `slrt_online` (default): real pretrained SLRT runtime.
+- `mock`: optional fallback for UI-only testing.
 
 ## Notes
 
 - Browser `SpeechSynthesis` is used for TTS.
 - Inference executes periodically on a sliding frame window.
 - CPU fallback is automatic when CUDA is unavailable.
+- Run verification:
+
+```bash
+python scripts/verify_pipeline.py
+```

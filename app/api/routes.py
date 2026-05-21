@@ -28,10 +28,8 @@ def index(request: Request) -> HTMLResponse:
 
 @router.get("/health")
 def health() -> dict:
-    return {
-        "status": "ok",
-        "engine": inference_service.engine_name,
-    }
+    status = inference_service.engine_status()
+    return {"status": "ok", **status}
 
 
 @router.post("/api/session/start", response_model=SessionResponse)
@@ -56,10 +54,12 @@ def ingest_frame(payload: FramePayload) -> PredictionResponse:
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid image payload")
 
-    text, confidence, updated = inference_service.push_and_predict(state, frame)
+    text, confidence, raw_tokens, latency_ms, updated = inference_service.push_and_predict(state, frame)
     return PredictionResponse(
         text=text,
         confidence=confidence,
+        raw_tokens=raw_tokens,
+        latency_ms=latency_ms,
         updated=updated,
         engine=inference_service.engine_name,
     )

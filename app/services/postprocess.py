@@ -15,6 +15,18 @@ def normalize_phrase(text: str) -> str:
     return text.lower()
 
 
+def dedupe_tokens(tokens: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for t in tokens:
+        token = t.strip().upper()
+        if not token:
+            continue
+        if cleaned and cleaned[-1] == token:
+            continue
+        cleaned.append(token)
+    return cleaned
+
+
 def smooth_prediction(
     candidate_text: str,
     confidence: float,

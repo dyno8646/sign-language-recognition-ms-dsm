@@ -4,7 +4,7 @@ app:
   debug: true
 
 inference:
-  engine: mock
+  engine: slrt_online
   target_fps: 4
   frame_width: 320
   frame_height: 240

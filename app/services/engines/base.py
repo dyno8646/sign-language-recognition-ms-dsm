@@ -11,6 +11,8 @@ import numpy as np
 class EnginePrediction:
     text: str
     confidence: float
+    raw_tokens: list[str]
+    latency_ms: int
 
 
 class BaseInferenceEngine(ABC):
@@ -23,3 +25,11 @@ class BaseInferenceEngine(ABC):
     @abstractmethod
     def predict_sequence(self, frames: Sequence[np.ndarray]) -> EnginePrediction:
         raise NotImplementedError
+
+    @property
+    def ready(self) -> bool:
+        return True
+
+    @property
+    def status_message(self) -> str:
+        return "ready"
