@@ -1,1 +1,5 @@
-"""mediapipe package module for Sign Language Recognition (MS DSM)."""
+"""Sign language recognition — MediaPipe Holistic tracking package."""
+
+from .holistic_tracker import HolisticTracker
+
+__all__ = ["HolisticTracker"]
