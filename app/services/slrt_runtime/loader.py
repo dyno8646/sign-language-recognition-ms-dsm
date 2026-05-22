@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class RuntimeAssets:
     config_path: Path
     checkpoint_path: Path
-    vocab_path: Path
+    vocab_path: Path | None
 
 
 def _pick_first(paths: list[Path]) -> Path | None:
@@ -59,10 +59,7 @@ def discover_assets(
             "No SLRT checkpoint found in checkpoints/slrt. Put a pretrained *.ckpt there or set SLRT_CHECKPOINT_PATH."
         )
     if vocab is None:
-        raise FileNotFoundError(
-            "No vocabulary file found in checkpoints/slrt. Put *.vocab or *.json there or set SLRT_VOCAB_PATH."
-        )
-
+        logger.warning("No vocab file found; runtime will synthesize token labels from checkpoint class count.")
     logger.info("SLRT assets config=%s checkpoint=%s vocab=%s", config, ckpt, vocab)
     return RuntimeAssets(config_path=config, checkpoint_path=ckpt, vocab_path=vocab)
 

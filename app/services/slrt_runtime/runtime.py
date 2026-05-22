@@ -73,8 +73,26 @@ class SLRTRuntime:
 
         slrt_misc.logger = logging.getLogger("slrt_cslr")
 
-    def _load_vocab(self) -> list[str]:
+    def _infer_class_count_from_state(self, state: dict) -> int:
+        candidate_keys = [
+            "recognition_network.visual_head.gloss_output_layer.weight",
+            "recognition_network.visual_head_keypoint.gloss_output_layer.weight",
+            "recognition_network.visual_head_fuse.gloss_output_layer.weight",
+        ]
+        for key in candidate_keys:
+            if key in state and hasattr(state[key], "shape"):
+                return int(state[key].shape[0])
+        for key, value in state.items():
+            if key.endswith("gloss_output_layer.weight") and hasattr(value, "shape"):
+                return int(value.shape[0])
+        raise RuntimeError("Could not infer class count from checkpoint state dict")
+
+    def _load_vocab(self, class_count: int) -> list[str]:
         path = self.assets.vocab_path
+        if path is None:
+            vocab = ["<blank>"] + [f"token_{i}" for i in range(1, class_count)]
+            self.blank_id = 0
+            return vocab
         with path.open("r", encoding="utf-8") as f:
             vocab = json.load(f)
         if "<blank>" in vocab:
@@ -82,6 +100,12 @@ class SLRTRuntime:
         else:
             vocab = ["<blank>"] + vocab
             self.blank_id = 0
+        if len(vocab) != class_count:
+            logger.warning("Vocab size %s does not match checkpoint classes %s; adjusting.", len(vocab), class_count)
+            if len(vocab) < class_count:
+                vocab.extend([f"token_{i}" for i in range(len(vocab), class_count)])
+            else:
+                vocab = vocab[:class_count]
         return vocab
 
     def _prepare_cfg(self) -> dict:
@@ -113,14 +137,15 @@ class SLRTRuntime:
 
     def warmup(self) -> None:
         self._bootstrap_imports()
-        self.vocab = self._load_vocab()
+        raw_ckpt = torch.load(self.assets.checkpoint_path, map_location=self.device)
+        state = raw_ckpt.get("model_state", raw_ckpt.get("state_dict", raw_ckpt))
+        class_count = self._infer_class_count_from_state(state)
+        self.vocab = self._load_vocab(class_count=class_count)
         cfg = self._prepare_cfg()
         from modelling.model import build_model  # type: ignore
         from utils.misc import neq_load_customized  # type: ignore
 
-        self.model = build_model(cfg, cls_num=len(self.vocab), word_emb_tab=None)
-        checkpoint = torch.load(self.assets.checkpoint_path, map_location=self.device)
-        state = checkpoint.get("model_state", checkpoint.get("state_dict", checkpoint))
+        self.model = build_model(cfg, cls_num=class_count, word_emb_tab=None)
         neq_load_customized(self.model, state, verbose=False)
         self.model.eval()
         self.loaded = True
@@ -167,7 +192,11 @@ class SLRTRuntime:
                 epoch=0,
             )
         logits = self._select_logits(forward_output)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("video_shape=%s keypoints_shape=%s logits_shape=%s", tuple(video.shape), tuple(kps.shape), tuple(logits.shape))
         decoded: DecodedPrediction = ctc_greedy_decode(logits=logits, vocab=self.vocab, blank_id=self.blank_id)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("decoded_tokens=%s confidence=%.4f", decoded.tokens, decoded.confidence)
         text = " ".join(decoded.tokens)
         latency_ms = int((time.perf_counter() - start) * 1000)
         return RuntimePrediction(

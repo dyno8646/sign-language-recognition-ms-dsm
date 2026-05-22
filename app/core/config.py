@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -32,8 +32,8 @@ class AppSettings:
     port: int = int(os.getenv("APP_PORT", "8000"))
     debug: bool = os.getenv("APP_DEBUG", "true").lower() == "true"
     root_dir: Path = Path(__file__).resolve().parents[2]
-    inference: InferenceSettings = InferenceSettings()
-    slrt: SLRTSettings = SLRTSettings()
+    inference: InferenceSettings = field(default_factory=InferenceSettings)
+    slrt: SLRTSettings = field(default_factory=SLRTSettings)
 
 
 settings = AppSettings()
